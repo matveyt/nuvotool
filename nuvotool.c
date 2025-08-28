@@ -18,7 +18,7 @@ const char program_name[] = "nuvotool";
 
 // user options
 struct {
-    bool erase, readonly, config;
+    bool erase, config;
     uint8_t config_bytes[5];
     char* port;
     char* input;
@@ -29,12 +29,11 @@ void help(void)
 {
     fprintf(stdout,
 "Usage: %s [OPTION]... [FILE]\n"
-"Nuvoton ISP programmer.  Write HEX/BIN file to APROM.\n"
+"Nuvoton ISP programmer. Write HEX/BIN file to APROM.\n"
 "\n"
 "-x, --erase        Erase APROM first\n"
 "-p, --port=PORT    Select serial device\n"
 "-c, --config=XX    Program CONFIG bytes\n"
-"-r, --readonly     Do not write anything\n"
 "-h, --help         Show this message and exit\n",
         program_name);
     exit(EXIT_SUCCESS);
@@ -46,13 +45,12 @@ void parse_args(int argc, char* argv[])
         { "erase", no_argument, NULL, 'x' },
         { "port", required_argument, NULL, 'p' },
         { "config", required_argument, NULL, 'c' },
-        { "readonly", no_argument, NULL, 'r' },
         { "help", no_argument, NULL, 'h' },
         {0}
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "xp:c:rh", lopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "xp:c:h", lopts, NULL)) != -1) {
         switch (c) {
         case 'x':
             opt.erase = true;
@@ -70,9 +68,6 @@ void parse_args(int argc, char* argv[])
                 errno = EILSEQ;
                 z_die("CONFIG");
             }
-        break;
-        case 'r':
-            opt.readonly = true;
         break;
         break;
         case 'h':
@@ -152,7 +147,7 @@ int main(int argc, char* argv[])
     ISP(READ_CONFIG);
     cbs = !!(data.b[0] & 0x80);
     ldrom_size = cfg2size(data.b[1]);
-    printf("Config: %02x%02x%02x%02x%02x\n", data.b[0], data.b[1], data.b[2],
+    printf("CONFIG: %02x%02x%02x%02x%02x\n", data.b[0], data.b[1], data.b[2],
         data.b[3], data.b[4]);
     printf("LDROM: %uKB, %sactive\n", ldrom_size / 1024, cbs ? "in" : "");
 
@@ -164,8 +159,7 @@ int main(int argc, char* argv[])
     if (opt.erase) {
         ucomm_timeout(conn.handle, 3000);
         puts("Erase APROM");
-        if (!opt.readonly)
-            ISP(ERASE_ALL);
+        ISP(ERASE_ALL);
         ucomm_timeout(conn.handle, 300);
     }
 
@@ -174,24 +168,29 @@ int main(int argc, char* argv[])
         FILE* fin = z_fopen(opt.input, "rb");
         size_t sz, base, entry;
         uint8_t* image = ihex_load8(&sz, &base, &entry, fin);
-        if (image == NULL || sz > flash_size - ldrom_size || base > 0 || entry > 0) {
+
+        if (image == NULL)
             errno = ENOEXEC;
-            z_die("ihex_load8");
-        }
+        else if (sz > flash_size - ldrom_size)
+            errno = EFBIG;
+        else if (base > 0 || entry > 0)
+            errno = EFAULT;
+        if (errno != 0)
+            z_die("ihex");
+
         printf("Write APROM[%zu]\n", sz);
-        if (!opt.readonly)
-            if (!isp_write(0, image, sz, &conn))
-                z_die("isp_write");
+        if (!isp_write(0, image, sz, &conn))
+            z_die("isp_write");
+
         free(image);
         fclose(fin);
     }
 
-    // Config
+    // CONFIG
     if (opt.config) {
         memcpy(data.b, opt.config_bytes, sizeof(opt.config_bytes));
         puts("Update CONFIG");
-        if (!opt.readonly)
-            ISP(UPDATE_CONFIG);
+        ISP(UPDATE_CONFIG);
     }
 
     puts("Exit LDROM");
