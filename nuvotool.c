@@ -10,7 +10,7 @@
 #include "stdz.h"
 #include <errno.h>
 #include <getopt.h>
-#include "ihex.h"
+#include "ihx.h"
 #include "isp.h"
 #include "ucomm.h"
 
@@ -60,7 +60,7 @@ void parse_args(int argc, char* argv[])
             opt.erase = true;
         break;
         case 'c':
-            if (ihex_blob(opt.config_bytes, sizeof(opt.config_bytes), optarg)
+            if (ihx_blob(opt.config_bytes, sizeof(opt.config_bytes), optarg)
                 == sizeof(opt.config_bytes)) {
                 opt.config_bytes[3] = UINT8_MAX;
                 opt.config = true;
@@ -186,17 +186,20 @@ int main(int argc, char* argv[])
     // Write
     if (opt.file != NULL) {
         FILE* fin = z_fopen(opt.file, "rb");
+        uint8_t* image;
         size_t sz, base, entry;
-        uint8_t* image = ihex_load8(&sz, &base, &entry, fin);
-
-        if (image == NULL)
+        if (ihx_load(&image, &sz, &base, &entry, fin) < 0) {
             errno = ENOEXEC;
-        else if (base > 0 || entry > 0)
+            z_die("ihx_load");
+        }
+        if (base > 0 || entry > 0) {
             errno = EFAULT;
-        else if (sz > fsz - ldsz)
+            z_die("ihx_load");
+        }
+        if (sz > fsz - ldsz) {
             errno = EFBIG;
-        if (errno != 0)
-            z_die("ihex");
+            z_die("ihx_load");
+        }
 
         printf("Write APROM[%zu]\n", sz);
         if (!isp_write(0, image, sz, &conn))
