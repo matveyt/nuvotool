@@ -14,10 +14,10 @@
 #include "isp.h"
 #include "ucomm.h"
 
-const char program_name[] = "nuvotool";
+static const char program_name[] = "nuvotool";
 
 // user options
-struct {
+static struct {
     char* file;
     char* port;
     bool erase, config;
@@ -25,7 +25,7 @@ struct {
 } opt = {0};
 
 /*noreturn*/
-void help(void)
+static void help(void)
 {
     fprintf(stdout,
 "Usage: %s [OPTION]... [FILE]\n"
@@ -39,7 +39,7 @@ void help(void)
     exit(EXIT_SUCCESS);
 }
 
-void parse_args(int argc, char* argv[])
+static void parse_args(int argc, char* argv[])
 {
     static struct option lopts[] = {
         { "port", required_argument, NULL, 'p' },
@@ -84,26 +84,26 @@ void parse_args(int argc, char* argv[])
 }
 
 // Nuvoton ID => Flash Size
-size_t nuvoton_flashsize(uint32_t id)
+static size_t nuvoton_flashsize(uint32_t id)
 {
     unsigned nib1 = (uint8_t)id >> 4;
     return (nib1 > 4) ? (18 * 1024) : (4096 << nib1);
 }
 
 // Nuvoton ID => Page Size
-size_t nuvoton_pagesize(uint32_t id)
+static size_t nuvoton_pagesize(uint32_t id)
 {
     return (id == 0x2f50/*N76E616*/) ? 256 : 128;
 }
 
 // CONFIG => CBS bit
-bool nuvoton_cbs(const uint8_t config[5])
+static bool nuvoton_cbs(const uint8_t config[5])
 {
     return !!(config[0] & 0x80);
 }
 
 // CONFIG => LDROM size
-size_t nuvoton_ldsize(const uint8_t config[])
+static size_t nuvoton_ldsize(const uint8_t config[])
 {
     unsigned ldsize = (7 - (config[1] & 7)) * 1024;
     return min(ldsize, 4096);
