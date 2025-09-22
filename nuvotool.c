@@ -27,7 +27,7 @@ static struct {
 /*noreturn*/
 static void help(void)
 {
-    fprintf(stdout,
+    printf(
 "Usage: %s [OPTION]... [FILE]\n"
 "Nuvoton ISP serial programmer. Write HEX/BIN file to APROM.\n"
 "\n"
@@ -62,7 +62,7 @@ static void parse_args(int argc, char* argv[])
         case 'c':
             if (ihx_blob(opt.config_bytes, sizeof(opt.config_bytes), optarg)
                 == sizeof(opt.config_bytes)) {
-                opt.config_bytes[3] = UINT8_MAX;
+                opt.config_bytes[3] = 0xff;
                 opt.config = true;
             } else {
                 errno = EILSEQ;
@@ -115,30 +115,26 @@ int main(int argc, char* argv[])
 
     // ISP connection
     uint8_t data[ISP_DATA_SIZE];
-    ISP_CONNECTION conn = {
-        .fd = ucomm_open(opt.port, 115200, 0x801/*8-N-1*/),
-        .read = ucomm_read,
-        .write = ucomm_write,
-    };
-    if (conn.fd < 0) {
+    intptr_t isp = ucomm_open(opt.port, 115200, 0x801/*8-N-1*/);
+    if (isp < 0) {
         if (opt.port == NULL)
             help();
         z_die("ucomm_open");
     }
     free(opt.port);
 
-    // assert RTS then DTR (aka. nodemcu reset)
-    ucomm_rts(conn.fd, 1);
-    ucomm_dtr(conn.fd, 1);
-    ucomm_rts(conn.fd, 0);
-    ucomm_dtr(conn.fd, 0);
+    // assert RTS then DTR (aka nodemcu reset)
+    ucomm_rts(isp, 1);
+    ucomm_dtr(isp, 1);
+    ucomm_rts(isp, 0);
+    ucomm_dtr(isp, 0);
 
     // wait for connect
     puts("Wait for connection...");
     do {
         // ISP_CONNECT
-    } while (!isp_command(ISP_CONNECT, data, &conn));
-    ucomm_purge(conn.fd);
+    } while (!isp_command(ISP_CONNECT, data, isp));
+    ucomm_purge(isp);
 
     // Chip Info
     uint32_t did;
@@ -149,7 +145,7 @@ int main(int argc, char* argv[])
     size_t ldsz;
 
 #define ISP(code)                               \
-    if (!isp_command(ISP_##code, data, &conn))  \
+    if (!isp_command(ISP_##code, data, isp))    \
         z_die(#code)
 
     // some bootloaders expect this
@@ -177,10 +173,10 @@ int main(int argc, char* argv[])
 
     // Erase
     if (opt.erase) {
-        ucomm_timeout(conn.fd, 3000);
+        ucomm_timeout(isp, 3000);
         puts("Erase APROM");
         ISP(ERASE_ALL);
-        ucomm_timeout(conn.fd, 300);
+        ucomm_timeout(isp, UCOMM_DEFAULT_TIMEOUT);
     }
 
     // Write
@@ -202,7 +198,7 @@ int main(int argc, char* argv[])
         }
 
         printf("Write APROM[%zu]\n", sz);
-        if (!isp_write(0, image, sz, &conn))
+        if (!isp_write(0, image, sz, isp))
             z_die("isp_write");
 
         free(image);
@@ -217,6 +213,6 @@ int main(int argc, char* argv[])
     }
 
     ISP(RUN_APROM);
-    ucomm_close(conn.fd);
+    ucomm_close(isp);
     exit(EXIT_SUCCESS);
 }

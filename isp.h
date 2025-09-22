@@ -2,9 +2,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
 
 enum {
+    ISP_PACKET_SIZE = 64,
+    ISP_DATA_SIZE = ISP_PACKET_SIZE - 2 * sizeof(uint32_t),
+
     ISP_UPDATE_APROM = 0xa0,
     ISP_UPDATE_CONFIG = 0xa1,
     ISP_READ_CONFIG = 0xa2,
@@ -19,15 +21,7 @@ enum {
     ISP_UPDATE_DATAFLASH = 0xc3,    // N/A
     ISP_GET_FLASHMODE = 0xca,       // N/A
     ISP_RESEND_PACKET = 0xff,       // N/A
-
-    ISP_DATA_SIZE = 56,
 };
 
-typedef struct {
-    intptr_t fd;
-    ssize_t (*read)(intptr_t fd, void* buffer, size_t length);
-    ssize_t (*write)(intptr_t fd, const void* buffer, size_t length);
-} ISP_CONNECTION;
-
-bool isp_command(uint32_t code, void* data, ISP_CONNECTION* conn);
-bool isp_write(uint32_t address, uint8_t* image, size_t length, ISP_CONNECTION* conn);
+bool isp_command(uint32_t code, void* data, intptr_t fd);
+bool isp_write(uint32_t address, uint8_t* image, size_t length, intptr_t fd);
