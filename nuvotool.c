@@ -8,13 +8,12 @@
 //
 
 #include "stdz.h"
-#include <errno.h>
-#include <getopt.h>
 #include "ihx.h"
 #include "isp.h"
 #include "ucomm.h"
+#include "ya_getopt.h"
 
-static const char program_name[] = "nuvotool";
+const char* z_progname = "nuvotool";
 
 // user options
 static struct {
@@ -25,9 +24,12 @@ static struct {
 } opt = {0};
 
 /*noreturn*/
-static void help(void)
+static void usage(int status)
 {
-    printf(
+    if (status != EXIT_SUCCESS)
+        fprintf(stderr, "Try '%s --help' for more information.\n", z_progname);
+    else
+        printf(
 "Usage: %s [OPTION]... [FILE]\n"
 "Nuvoton ISP serial programmer. Write HEX/BIN file to APROM.\n"
 "\n"
@@ -35,8 +37,8 @@ static void help(void)
 "-x, --erase        Erase APROM first\n"
 "-c, --config=XX    Program CONFIG bytes\n"
 "-h, --help         Show this message and exit\n",
-        program_name);
-    exit(EXIT_SUCCESS);
+        z_progname);
+    exit(status);
 }
 
 static void parse_args(int argc, char* argv[])
@@ -64,17 +66,14 @@ static void parse_args(int argc, char* argv[])
                 == sizeof(opt.config_bytes)) {
                 opt.config_bytes[3] = 0xff;
                 opt.config = true;
-            } else {
-                errno = EILSEQ;
-                z_die("CONFIG");
-            }
+            } else
+                z_error(EXIT_FAILURE, EILSEQ, "CONFIG %s", optarg);
         break;
         case 'h':
-            help();
+            usage(EXIT_SUCCESS);
         break;
         case '?':
-            fprintf(stderr, "Try '%s --help' for more information.\n", program_name);
-            exit(EXIT_FAILURE);
+            usage(EXIT_FAILURE);
         break;
         }
     }
@@ -117,9 +116,10 @@ int main(int argc, char* argv[])
     uint8_t data[ISP_DATA_SIZE];
     intptr_t isp = ucomm_open(opt.port, 115200, 0x801/*8-N-1*/);
     if (isp < 0) {
-        if (opt.port == NULL)
-            help();
-        z_die("ucomm_open");
+        if (opt.port != NULL)
+            z_error(EXIT_FAILURE, errno, "ucomm_open(\"%s\")", opt.port);
+        z_error(0, -1, "missing port name");
+        usage(EXIT_FAILURE);
     }
     free(opt.port);
 
@@ -132,6 +132,7 @@ int main(int argc, char* argv[])
     // wait for connect
     puts("Wait for connection...");
     do {
+        (void)ucomm_getc(isp);  // delay
         // ISP_CONNECT
     } while (!isp_command(ISP_CONNECT, data, isp));
     ucomm_purge(isp);
@@ -144,9 +145,9 @@ int main(int argc, char* argv[])
     bool cbs;
     size_t ldsz;
 
-#define ISP(code)                               \
-    if (!isp_command(ISP_##code, data, isp))    \
-        z_die(#code)
+#define ISP(code)                                       \
+    if (!isp_command(ISP_##code, data, isp))            \
+        z_error(EXIT_FAILURE, -1, "%s failed", #code)
 
     // some bootloaders expect this
     ISP(SYNC_PACKNO);
@@ -184,22 +185,16 @@ int main(int argc, char* argv[])
         FILE* fin = z_fopen(opt.file, "rb");
         uint8_t* image;
         size_t sz, base, entry;
-        if (ihx_load(&image, &sz, &base, &entry, fin) < 0) {
-            errno = ENOEXEC;
-            z_die("ihx_load");
-        }
-        if (base > 0 || entry > 0) {
-            errno = EFAULT;
-            z_die("ihx_load");
-        }
-        if (sz > fsz - ldsz) {
-            errno = EFBIG;
-            z_die("ihx_load");
-        }
+        if (ihx_load(&image, &sz, &base, &entry, fin) < 0)
+            z_error(EXIT_FAILURE, errno, "ihx_load");
+        if (base > 0 || entry > 0)
+            z_error(EXIT_FAILURE, EFAULT, "ihx_load");
+        if (sz > fsz - ldsz)
+            z_error(EXIT_FAILURE, EFBIG, "ihx_load");
 
         printf("Write APROM[%zu]\n", sz);
         if (!isp_write(0, image, sz, isp))
-            z_die("isp_write");
+            z_error(EXIT_FAILURE, -1, "isp_write(%zu)", sz);
 
         free(image);
         fclose(fin);

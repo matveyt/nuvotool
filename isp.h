@@ -1,4 +1,6 @@
-#pragma once
+#if !defined(ISP_H)
+#define ISP_H
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,3 +27,5 @@ enum {
 
 bool isp_command(uint32_t code, void* data, intptr_t fd);
 bool isp_write(uint32_t address, uint8_t* image, size_t length, intptr_t fd);
+
+#endif // ISP_H

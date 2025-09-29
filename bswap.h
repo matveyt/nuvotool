@@ -1,4 +1,6 @@
-#pragma once
+#if !defined(BSWAP_H)
+#define BSWAP_H
+
 #include <stdint.h>
 
 static uint16_t lsb16(uint16_t num);
@@ -11,7 +13,7 @@ static uint16_t bswap16(uint16_t num);
 static uint32_t bswap32(uint32_t num);
 static uint64_t bswap64(uint64_t num);
 
-// note: better compiled with -O2
+// better compiled with -O2
 
 inline uint16_t lsb16(uint16_t num)
 { return (*(uint8_t*)(int[]){1}) ? num : bswap16(num); }
@@ -46,3 +48,5 @@ inline uint64_t bswap64(uint64_t num)
     num = ((num << 16) & 0xffff0000ffff0000) | ((num >> 16) & 0x0000ffff0000ffff);
     return (num << 32) | (num >> 32);
 }
+
+#endif // BSWAP_H
