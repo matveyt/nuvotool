@@ -9,11 +9,11 @@ bool isp_command(uint32_t code, void* data, intptr_t fd)
     static uint32_t packno = 1;
 
     union {
+        uint8_t raw[ISP_PACKET_SIZE];
         struct {
             uint32_t code, packno;
             uint8_t data[ISP_DATA_SIZE];
         } cookie;
-        uint8_t raw[8 + ISP_DATA_SIZE];
     } pack;
     pack.cookie.code = lsb32(code);
     pack.cookie.packno = lsb32(packno);
@@ -21,16 +21,16 @@ bool isp_command(uint32_t code, void* data, intptr_t fd)
 
     // calc checksum
     uint32_t checksum = 0;
-    for (size_t i = 0; i < sizeof(pack.raw); ++i)
+    for (size_t i = 0; i < ISP_PACKET_SIZE; ++i)
         checksum += pack.raw[i];
 
     // send packet
-    if (ucomm_write(fd, pack.raw, sizeof(pack.raw)) != sizeof(pack.raw))
+    if (ucomm_write(fd, pack.raw, ISP_PACKET_SIZE) != ISP_PACKET_SIZE)
         return false;
 
     // read response unless mcu is reset
     if (code < ISP_RUN_APROM || code > ISP_RESET) {
-        if (ucomm_read(fd, pack.raw, sizeof(pack.raw)) != sizeof(pack.raw))
+        if (ucomm_read(fd, pack.raw, ISP_PACKET_SIZE) != ISP_PACKET_SIZE)
             return false;
         if (pack.cookie.code != lsb32(checksum))
             return false;

@@ -13,11 +13,16 @@ flags. The source code itself is thought to be C99 portable.
 ### Use
 
 ```
-Usage: nuvotool [OPTION]... [FILE]
+Usage: nuvotool.exe [OPTION]... [FILE]
 Nuvoton ISP serial programmer. Write HEX/BIN file to APROM.
 
--p, --port=PORT    Select serial device
--x, --erase        Erase APROM first
--c, --config=XX    Program CONFIG bytes
--h, --help         Show this message and exit
+-p, --port=PORT        Select serial device
+-x, --erase            Erase APROM first
+-c, --config=X[,X...]  Setup CONFIG
+-h, --help             Show this message and exit
+
+Valid CONFIG fields: lock, rpd, ocden, ocdpwm, cbs, ldsize=0,1024,2048,3072,4096,
+        cborst, boiap, cboden, cbov=2.2,2.7,3.7,4.4, wdten=disable,enable,always
+Note that '--config rpd' or '--config rpd=yes' stands for '--config rpd=0',
+        while '--config cborst' for '--config cborst=1', etc.
 ```

@@ -11,63 +11,138 @@
 #include "ihx.h"
 #include "isp.h"
 #include "ucomm.h"
-#include "ya_getopt.h"
 
-const char* z_progname = "nuvotool";
+enum {
+    CONFIG_LOCK, CONFIG_RPD, CONFIG_OCDEN, CONFIG_OCDPWM, CONFIG_CBS, CONFIG_LDSIZE,
+    CONFIG_CBORST, CONFIG_BOIAP, CONFIG_CBOV, CONFIG_CBODEN, CONFIG_WDTEN
+};
+
+static int str2bit(const char* str, int value_on);
+static int str2int(const char* str, const char* const* tokens, const int* numbers);
+static size_t nuvoton_flashsize(uint32_t id);
+static size_t nuvoton_pagesize(uint32_t id);
+static size_t nuvoton_ldromsize(uint8_t ldsize);
+uint8_t nuvoton_ldsize(size_t ldsz);
+static void print_config(const CONFIG* configp);
 
 // user options
 static struct {
     char* file;
     char* port;
-    bool erase, config;
-    uint8_t config_bytes[5];
+    bool erase;
+    unsigned config_flags;  // 1 << CONFIG_XXX
+    CONFIG config;
 } opt = {0};
 
 /*noreturn*/
 static void usage(int status)
 {
-    if (status != EXIT_SUCCESS)
-        fprintf(stderr, "Try '%s --help' for more information.\n", z_progname);
+    if (status != 0)
+        fprintf(stderr, "Try '%s --help' for more information.\n", z_getprogname());
     else
         printf(
 "Usage: %s [OPTION]... [FILE]\n"
 "Nuvoton ISP serial programmer. Write HEX/BIN file to APROM.\n"
 "\n"
-"-p, --port=PORT    Select serial device\n"
-"-x, --erase        Erase APROM first\n"
-"-c, --config=XX    Program CONFIG bytes\n"
-"-h, --help         Show this message and exit\n",
-        z_progname);
+"-p, --port=PORT        Select serial device\n"
+"-x, --erase            Erase APROM first\n"
+"-c, --config=X[,X...]  Setup CONFIG\n"
+"-h, --help             Show this message and exit\n"
+"\n"
+"Valid CONFIG fields: lock, rpd, ocden, ocdpwm, cbs, ldsize=0,1024,2048,3072,4096,\n"
+"\tcborst, boiap, cboden, cbov=2.2,2.7,3.7,4.4, wdten=disable,enable,always\n"
+"Note that '--config rpd' or '--config rpd=yes' stands for '--config rpd=0',\n"
+"\twhile '--config cborst' for '--config cborst=1', etc.\n",
+        z_getprogname());
     exit(status);
 }
 
 static void parse_args(int argc, char* argv[])
 {
-    static struct option lopts[] = {
-        { "port", required_argument, NULL, 'p' },
-        { "erase", no_argument, NULL, 'x' },
-        { "config", required_argument, NULL, 'c' },
-        { "help", no_argument, NULL, 'h' },
+    z_setprogname(argv[0]);
+
+    static struct z_option lopts[] = {
+        { "port", z_required_argument, NULL, 'p' },
+        { "erase", z_no_argument, NULL, 'x' },
+        { "config", z_required_argument, NULL, 'c' },
+        { "help", z_no_argument, NULL, 'h' },
         {0}
     };
 
+    static char* const subopts[] = {
+        [CONFIG_LOCK] = "lock",
+        [CONFIG_RPD] = "rpd",
+        [CONFIG_OCDEN] = "ocden",
+        [CONFIG_OCDPWM] = "ocdpwm",
+        [CONFIG_CBS] = "cbs",
+        [CONFIG_LDSIZE] = "ldsize",
+        [CONFIG_CBORST] = "cborst",
+        [CONFIG_BOIAP] = "boiap",
+        [CONFIG_CBOV] = "cbov",
+        [CONFIG_CBODEN] = "cboden",
+        [CONFIG_WDTEN] = "wdten",
+        NULL
+    };
+
     int c;
-    while ((c = getopt_long(argc, argv, "p:xc:h", lopts, NULL)) != -1) {
+    while ((c = z_getopt_long(argc, argv, "p:xc:h", lopts, NULL)) != -1) {
         switch (c) {
         case 'p':
             free(opt.port);
-            opt.port = z_strdup(optarg);
+            opt.port = z_strdup(z_optarg);
         break;
         case 'x':
             opt.erase = true;
         break;
         case 'c':
-            if (ihx_blob(opt.config_bytes, sizeof(opt.config_bytes), optarg)
-                == sizeof(opt.config_bytes)) {
-                opt.config_bytes[3] = 0xff;
-                opt.config = true;
-            } else
-                z_error(EXIT_FAILURE, EILSEQ, "CONFIG %s", optarg);
+            do {
+                char* subarg;
+                int subopt = z_getsubopt(&z_optarg, subopts, &subarg);
+                if (subopt < 0)
+                    continue;
+                opt.config_flags |= 1 << subopt;
+                switch (subopt) {
+                case CONFIG_LOCK:
+                    opt.config.bit.LOCK = str2bit(subarg, 0);
+                break;
+                case CONFIG_RPD:
+                    opt.config.bit.RPD = str2bit(subarg, 0);
+                break;
+                case CONFIG_OCDEN:
+                    opt.config.bit.OCDEN = str2bit(subarg, 0);
+                break;
+                case CONFIG_OCDPWM:
+                    opt.config.bit.OCDPWM = str2bit(subarg, 0);
+                break;
+                case CONFIG_CBS:
+                    opt.config.bit.CBS = str2bit(subarg, 0);
+                break;
+                case CONFIG_LDSIZE:
+                    opt.config.bit.LDSIZE = nuvoton_ldsize(strtoul(subarg, NULL, 0));
+                break;
+                case CONFIG_CBORST:
+                    opt.config.bit.CBORST = str2bit(subarg, 1);
+                break;
+                case CONFIG_BOIAP:
+                    opt.config.bit.BOIAP = str2bit(subarg, 1);
+                break;
+                case CONFIG_CBOV:
+                    opt.config.bit.CBOV = str2int(subarg,
+                        (const char*[]){ "2.2", "2.7", "3.7", "4.4", NULL },
+                        (const int[]){ 3, 2, 1, 0 });
+                break;
+                case CONFIG_CBODEN:
+                    opt.config.bit.CBODEN = str2bit(subarg, 1);
+                break;
+                case CONFIG_WDTEN:
+                    opt.config.bit.WDTEN = str2int(subarg,
+                        (const char*[]){ "disable", "enable", "always", NULL },
+                        (const int[]){ 15, 5, 0 } );
+                break;
+                default:
+                break;
+                }
+            } while (*z_optarg != 0);
         break;
         case 'h':
             usage(EXIT_SUCCESS);
@@ -78,34 +153,8 @@ static void parse_args(int argc, char* argv[])
         }
     }
 
-    if (optind == argc - 1)
-        opt.file = z_strdup(argv[optind]);
-}
-
-// Nuvoton ID => Flash Size
-static size_t nuvoton_flashsize(uint32_t id)
-{
-    unsigned nib1 = (uint8_t)id >> 4;
-    return (nib1 > 4) ? (18 * 1024) : (4096 << nib1);
-}
-
-// Nuvoton ID => Page Size
-static size_t nuvoton_pagesize(uint32_t id)
-{
-    return (id == 0x2f50/*N76E616*/) ? 256 : 128;
-}
-
-// CONFIG => CBS bit
-static bool nuvoton_cbs(const uint8_t config[5])
-{
-    return !!(config[0] & 0x80);
-}
-
-// CONFIG => LDROM size
-static size_t nuvoton_ldsize(const uint8_t config[])
-{
-    unsigned ldsize = (7 - (config[1] & 7)) * 1024;
-    return min(ldsize, 4096);
+    if (z_optind < argc)
+        opt.file = z_strdup(argv[z_optind]);
 }
 
 int main(int argc, char* argv[])
@@ -118,7 +167,7 @@ int main(int argc, char* argv[])
     if (isp < 0) {
         if (opt.port != NULL)
             z_error(EXIT_FAILURE, errno, "ucomm_open(\"%s\")", opt.port);
-        z_error(0, -1, "missing port name");
+        z_warnx(1, "missing port name");
         usage(EXIT_FAILURE);
     }
     free(opt.port);
@@ -139,15 +188,13 @@ int main(int argc, char* argv[])
 
     // Chip Info
     uint32_t did;
-    size_t fsz, psz;
+    size_t fsz, psz, ldsz;
     uint8_t fw_version;
-    uint8_t config[5];
-    bool cbs;
-    size_t ldsz;
+    CONFIG config;
 
 #define ISP(code)                                       \
     if (!isp_command(ISP_##code, data, isp))            \
-        z_error(EXIT_FAILURE, -1, "%s failed", #code)
+        z_error(EXIT_FAILURE, errno, "%s failed", #code)
 
     // some bootloaders expect this
     ISP(SYNC_PACKNO);
@@ -161,16 +208,13 @@ int main(int argc, char* argv[])
     fw_version = data[0];
 
     ISP(READ_CONFIG);
-    memcpy(config, data, sizeof(config));
-    cbs = nuvoton_cbs(config);
-    ldsz = nuvoton_ldsize(config);
+    memcpy(config.raw, data, sizeof(CONFIG));
+    ldsz = nuvoton_ldromsize(config.bit.LDSIZE);
 
     printf("Device ID: 0x%x\n", did);
     printf("Flash Memory: %zuKB,%zup,x%zu\n", fsz / 1024, fsz / psz, psz);
     printf("FW Version: 0x%x\n", fw_version);
-    printf("CONFIG: %02x%02x%02x%02x%02x\n",
-        config[0], config[1], config[2], config[3], config[4]);
-    printf("LDROM: %zuKB, %sactive\n", ldsz / 1024, cbs ? "in" : "");
+    print_config(&config);
 
     // Erase
     if (opt.erase) {
@@ -194,15 +238,29 @@ int main(int argc, char* argv[])
 
         printf("Write APROM[%zu]\n", sz);
         if (!isp_write(0, image, sz, isp))
-            z_error(EXIT_FAILURE, -1, "isp_write(%zu)", sz);
+            z_error(EXIT_FAILURE, errno, "isp_write(%zu)", sz);
 
         free(image);
         fclose(fin);
     }
 
     // CONFIG
-    if (opt.config) {
-        memcpy(data, opt.config_bytes, sizeof(opt.config_bytes));
+    if (opt.config_flags != 0) {
+#define MOVE_BIT(flag)                                  \
+        if (opt.config_flags & (1 << CONFIG_##flag))    \
+            config.bit.flag = opt.config.bit.flag
+        MOVE_BIT(LOCK);
+        MOVE_BIT(RPD);
+        MOVE_BIT(OCDEN);
+        MOVE_BIT(OCDPWM);
+        MOVE_BIT(CBS);
+        MOVE_BIT(LDSIZE);
+        MOVE_BIT(CBORST);
+        MOVE_BIT(BOIAP);
+        MOVE_BIT(CBOV);
+        MOVE_BIT(CBODEN);
+        MOVE_BIT(WDTEN);
+        memcpy(data, config.raw, sizeof(CONFIG));
         puts("Update CONFIG");
         ISP(UPDATE_CONFIG);
     }
@@ -210,4 +268,78 @@ int main(int argc, char* argv[])
     ISP(RUN_APROM);
     ucomm_close(isp);
     exit(EXIT_SUCCESS);
+}
+
+int str2bit(const char* str, int value_on)
+{
+    if (!str || strcmp(str, "enable") == 0 || strcmp(str, "on") == 0
+        || strcmp(str, "true") == 0 || strcmp(str, "yes") == 0)
+        return value_on;
+    if (strcmp(str, "disable") == 0 || strcmp(str, "off") == 0
+        || strcmp(str, "false") == 0 || strcmp(str, "no") == 0)
+        return !value_on;
+
+    char* end;
+    unsigned long value = strtoul(str, &end, 0);
+    return (end == str) ? !value_on : !!value;
+}
+
+int str2int(const char* str, const char* const* tokens, const int* numbers)
+{
+    if (str) {
+        for (int i = 0; tokens[i]; ++i)
+            if (strcmp(str, tokens[i]) == 0)
+                return numbers[i];
+    }
+
+    return numbers[0];
+}
+
+// Nuvoton ID => Flash Size
+size_t nuvoton_flashsize(uint32_t id)
+{
+    unsigned nib1 = (uint8_t)id >> 4;
+    return (nib1 > 4) ? (18 * 1024) : (4096 << nib1);
+}
+
+// Nuvoton ID => Page Size
+size_t nuvoton_pagesize(uint32_t id)
+{
+    return (id == 0x2f50/*N76E616*/) ? 256 : 128;
+}
+
+// LDSIZE bits => LDROM Size
+size_t nuvoton_ldromsize(uint8_t ldsz)
+{
+    unsigned sz = (7 - ldsz) * 1024;
+    return min(sz, 4096);
+}
+
+// LDROM Size => LDSIZE bits
+uint8_t nuvoton_ldsize(size_t ldsz)
+{
+    unsigned kb = (ldsz + 1023) / 1024;
+    return (kb >= 4) ? 0 : (7 - kb);
+}
+
+void print_config(const CONFIG* configp)
+{
+    printf("CONFIG0 = 0x%02x\n", configp->byte.CONFIG0);
+    printf("\tChip Lock\t\t%s\n", configp->bit.LOCK ? "no" : "yes");
+    printf("\tReset Pin\t\t%s\n", configp->bit.RPD ? "enable" : "disable");
+    printf("\tOn-Chip-Debugger\t%s\n", configp->bit.OCDEN ? "disable" : "enable");
+    printf("\tPWM While OCD Halt\t%s\n", configp->bit.OCDPWM ? "tri-state" : "yes");
+    printf("\tBoot Select\t\t%s\n", configp->bit.CBS ? "APROM" : "LDROM");
+    printf("CONFIG1 = 0x%02x\n", configp->byte.CONFIG1);
+    printf("\tLDROM Size\t\t%zu\n", nuvoton_ldromsize(configp->bit.LDSIZE));
+    printf("CONFIG2 = 0x%02x\n", configp->byte.CONFIG2);
+    printf("\tBrown-Out Reset\t\t%s\n", configp->bit.CBORST ? "yes" : "no");
+    printf("\tBrown-Out Inhibit IAP\t%s\n", configp->bit.BOIAP ? "yes" : "no");
+    printf("\tBrown-Out Voltage\t%s V\n",
+        (const char*[]){ "2.2", "2.7", "3.7", "4.4" }[3 - configp->bit.CBOV]);
+    printf("\tBrown-Out Detect\t%s\n", configp->bit.CBODEN ? "yes" : "no");
+    printf("CONFIG3 = 0x%02x\n", configp->byte.CONFIG3);
+    printf("CONFIG4 = 0x%02x\n", configp->byte.CONFIG4);
+    printf("\tWatchdog Timer\t\t%s\n\n", configp->bit.WDTEN == 15 ? "disable" :
+        configp->bit.WDTEN == 5 ? "enable" : "always");
 }
