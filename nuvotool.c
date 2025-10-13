@@ -17,13 +17,14 @@ enum {
     CONFIG_CBORST, CONFIG_BOIAP, CONFIG_CBOV, CONFIG_CBODEN, CONFIG_WDTEN
 };
 
-static int str2bit(const char* str, int value_on);
-static int str2int(const char* str, const char* const* tokens, const int* numbers);
+static void list_ports(void);
 static size_t nuvoton_flashsize(uint32_t id);
 static size_t nuvoton_pagesize(uint32_t id);
 static size_t nuvoton_ldromsize(uint8_t ldsize);
-uint8_t nuvoton_ldsize(size_t ldsz);
+static uint8_t nuvoton_ldsize(size_t ldsz);
 static void print_config(const CONFIG* configp);
+static int str2bit(const char* str, int value_on);
+static int str2int(const char* str, const char* const* tokens, const int* numbers);
 
 // user options
 static struct {
@@ -47,6 +48,7 @@ static void usage(int status)
 "-p, --port=PORT        Select serial device\n"
 "-x, --erase            Erase APROM first\n"
 "-c, --config=X[,X...]  Setup CONFIG\n"
+"-l, --list-ports       List available ports only\n"
 "-h, --help             Show this message and exit\n"
 "\n"
 "Valid CONFIG fields: lock, rpd, ocden, ocdpwm, cbs, ldsize=0,1024,2048,3072,4096,\n"
@@ -65,6 +67,7 @@ static void parse_args(int argc, char* argv[])
         { "port", z_required_argument, NULL, 'p' },
         { "erase", z_no_argument, NULL, 'x' },
         { "config", z_required_argument, NULL, 'c' },
+        { "list-ports", z_no_argument, NULL, 'l' },
         { "help", z_no_argument, NULL, 'h' },
         {0}
     };
@@ -85,7 +88,7 @@ static void parse_args(int argc, char* argv[])
     };
 
     int c;
-    while ((c = z_getopt_long(argc, argv, "p:xc:h", lopts, NULL)) != -1) {
+    while ((c = z_getopt_long(argc, argv, "p:xc:lh", lopts, NULL)) != -1) {
         switch (c) {
         case 'p':
             free(opt.port);
@@ -143,6 +146,10 @@ static void parse_args(int argc, char* argv[])
                 break;
                 }
             } while (*z_optarg != 0);
+        break;
+        case 'l':
+            list_ports();
+            exit(EXIT_SUCCESS);
         break;
         case 'h':
             usage(EXIT_SUCCESS);
@@ -270,29 +277,14 @@ int main(int argc, char* argv[])
     exit(EXIT_SUCCESS);
 }
 
-int str2bit(const char* str, int value_on)
+void list_ports(void)
 {
-    if (!str || strcmp(str, "enable") == 0 || strcmp(str, "on") == 0
-        || strcmp(str, "true") == 0 || strcmp(str, "yes") == 0)
-        return value_on;
-    if (strcmp(str, "disable") == 0 || strcmp(str, "off") == 0
-        || strcmp(str, "false") == 0 || strcmp(str, "no") == 0)
-        return !value_on;
-
-    char* end;
-    unsigned long value = strtoul(str, &end, 0);
-    return (end == str) ? !value_on : !!value;
-}
-
-int str2int(const char* str, const char* const* tokens, const int* numbers)
-{
-    if (str) {
-        for (int i = 0; tokens[i]; ++i)
-            if (strcmp(str, tokens[i]) == 0)
-                return numbers[i];
-    }
-
-    return numbers[0];
+    char** ports;
+    size_t n = ucomm_ports(&ports);
+    for (size_t i = 0; i < n; ++i)
+        puts(ports[i]);
+    printf("%zu ports found\n", n);
+    free(ports);
 }
 
 // Nuvoton ID => Flash Size
@@ -342,4 +334,29 @@ void print_config(const CONFIG* configp)
     printf("CONFIG4 = 0x%02x\n", configp->byte.CONFIG4);
     printf("\tWatchdog Timer\t\t%s\n\n", configp->bit.WDTEN == 15 ? "disable" :
         configp->bit.WDTEN == 5 ? "enable" : "always");
+}
+
+int str2bit(const char* str, int value_on)
+{
+    if (!str || strcmp(str, "enable") == 0 || strcmp(str, "on") == 0
+        || strcmp(str, "true") == 0 || strcmp(str, "yes") == 0)
+        return value_on;
+    if (strcmp(str, "disable") == 0 || strcmp(str, "off") == 0
+        || strcmp(str, "false") == 0 || strcmp(str, "no") == 0)
+        return !value_on;
+
+    char* end;
+    unsigned long value = strtoul(str, &end, 0);
+    return (end == str) ? !value_on : !!value;
+}
+
+int str2int(const char* str, const char* const* tokens, const int* numbers)
+{
+    if (str) {
+        for (int i = 0; tokens[i]; ++i)
+            if (strcmp(str, tokens[i]) == 0)
+                return numbers[i];
+    }
+
+    return numbers[0];
 }

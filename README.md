@@ -13,12 +13,13 @@ flags. The source code itself is thought to be C99 portable.
 ### Use
 
 ```
-Usage: nuvotool.exe [OPTION]... [FILE]
+Usage: nuvotool [OPTION]... [FILE]
 Nuvoton ISP serial programmer. Write HEX/BIN file to APROM.
 
 -p, --port=PORT        Select serial device
 -x, --erase            Erase APROM first
 -c, --config=X[,X...]  Setup CONFIG
+-l, --list-ports       List available ports only
 -h, --help             Show this message and exit
 
 Valid CONFIG fields: lock, rpd, ocden, ocdpwm, cbs, ldsize=0,1024,2048,3072,4096,
