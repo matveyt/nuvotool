@@ -188,7 +188,6 @@ int main(int argc, char* argv[])
     // wait for connect
     puts("Wait for connection...");
     do {
-        (void)ucomm_getc(isp);  // delay
         // ISP_CONNECT
     } while (!isp_command(ISP_CONNECT, data, isp));
     ucomm_purge(isp);
@@ -236,7 +235,7 @@ int main(int argc, char* argv[])
         FILE* fin = z_fopen(opt.file, "rb");
         uint8_t* image;
         size_t sz, base, entry;
-        if (ihx_load(&image, &sz, &base, &entry, fin) < 0)
+        if (ihx_load(&image, &sz, &base, &entry, 0xff, fin) < 0)
             z_error(EXIT_FAILURE, errno, "ihx_load");
         if (base > 0 || entry > 0)
             z_error(EXIT_FAILURE, EFAULT, "ihx_load");
