@@ -174,7 +174,7 @@ int main(int argc, char* argv[])
     if (isp < 0) {
         if (opt.port != NULL)
             z_error(EXIT_FAILURE, errno, "ucomm_open(\"%s\")", opt.port);
-        z_warnx(1, "missing port name");
+        z_warnx("missing port name");
         usage(EXIT_FAILURE);
     }
     free(opt.port);
@@ -337,11 +337,11 @@ void print_config(const CONFIG* configp)
 
 int str2bit(const char* str, int value_on)
 {
-    if (!str || strcmp(str, "enable") == 0 || strcmp(str, "on") == 0
-        || strcmp(str, "true") == 0 || strcmp(str, "yes") == 0)
+    if (!str || z_strcasecmp(str, "enable") == 0 || z_strcasecmp(str, "on") == 0
+        || z_strcasecmp(str, "true") == 0 || z_strcasecmp(str, "yes") == 0)
         return value_on;
-    if (strcmp(str, "disable") == 0 || strcmp(str, "off") == 0
-        || strcmp(str, "false") == 0 || strcmp(str, "no") == 0)
+    if (z_strcasecmp(str, "disable") == 0 || z_strcasecmp(str, "off") == 0
+        || z_strcasecmp(str, "false") == 0 || z_strcasecmp(str, "no") == 0)
         return !value_on;
 
     char* end;
@@ -353,7 +353,7 @@ int str2int(const char* str, const char* const* tokens, const int* numbers)
 {
     if (str) {
         for (int i = 0; tokens[i]; ++i)
-            if (strcmp(str, tokens[i]) == 0)
+            if (z_strcasecmp(str, tokens[i]) == 0)
                 return numbers[i];
     }
 
