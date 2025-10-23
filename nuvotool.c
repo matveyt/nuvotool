@@ -24,7 +24,8 @@ static size_t nuvoton_ldromsize(uint8_t ldsize);
 static uint8_t nuvoton_ldsize(size_t ldsz);
 static void print_config(const CONFIG* configp);
 static int str2bit(const char* str, int value_on);
-static int str2int(const char* str, const char* const* tokens, const int* numbers);
+static int str2int(const char* const* tokens, const int* numbers, size_t n,
+    const char* str);
 
 // user options
 static struct {
@@ -72,7 +73,7 @@ static void parse_args(int argc, char* argv[])
         {0}
     };
 
-    static char* const subopts[] = {
+    static const char* const subopts[] = {
         [CONFIG_LOCK] = "lock",
         [CONFIG_RPD] = "rpd",
         [CONFIG_OCDEN] = "ocden",
@@ -130,17 +131,17 @@ static void parse_args(int argc, char* argv[])
                     opt.config.bit.BOIAP = str2bit(subarg, 1);
                 break;
                 case CONFIG_CBOV:
-                    opt.config.bit.CBOV = str2int(subarg,
-                        (const char*[]){ "2.2", "2.7", "3.7", "4.4", NULL },
-                        (const int[]){ 3, 2, 1, 0 });
+                    opt.config.bit.CBOV = str2int(
+                        (const char*[]){ "2.2", "2.7", "3.7", "4.4" },
+                        (const int[]){ 3, 2, 1, 0 }, 4, subarg);
                 break;
                 case CONFIG_CBODEN:
                     opt.config.bit.CBODEN = str2bit(subarg, 1);
                 break;
                 case CONFIG_WDTEN:
-                    opt.config.bit.WDTEN = str2int(subarg,
-                        (const char*[]){ "disable", "enable", "always", NULL },
-                        (const int[]){ 15, 5, 0 } );
+                    opt.config.bit.WDTEN = str2int(
+                        (const char*[]){ "disable", "enable", "always" },
+                        (const int[]){ 15, 5, 0 }, 3, subarg);
                 break;
                 default:
                 break;
@@ -173,7 +174,7 @@ int main(int argc, char* argv[])
     intptr_t isp = ucomm_open(opt.port, 115200, 0x801/*8-N-1*/);
     if (isp < 0) {
         if (opt.port != NULL)
-            z_error(EXIT_FAILURE, errno, "ucomm_open(\"%s\")", opt.port);
+            z_error(EXIT_FAILURE, errno, "ucomm_open(%s)", opt.port);
         z_warnx("missing port name");
         usage(EXIT_FAILURE);
     }
@@ -202,7 +203,7 @@ int main(int argc, char* argv[])
     if (!isp_command(ISP_##code, data, isp))            \
         z_error(EXIT_FAILURE, errno, "%s failed", #code)
 
-    // some bootloaders expect this
+    // may be required by bootloader
     ISP(SYNC_PACKNO);
 
     ISP(GET_DEVICEID);
@@ -217,9 +218,9 @@ int main(int argc, char* argv[])
     memcpy(config.raw, data, sizeof(CONFIG));
     ldsz = nuvoton_ldromsize(config.bit.LDSIZE);
 
-    printf("Device ID: 0x%x\n", did);
+    printf("Device ID: %#x\n", did);
     printf("Flash Memory: %zuKB,%zup,x%zu\n", fsz / 1024, fsz / psz, psz);
-    printf("FW Version: 0x%x\n", fw_version);
+    printf("FW Version: %#x\n", fw_version);
     print_config(&config);
 
     // Erase
@@ -233,20 +234,19 @@ int main(int argc, char* argv[])
     // Write
     if (opt.file != NULL) {
         FILE* fin = z_fopen(opt.file, "rb");
-        uint8_t* image;
-        size_t sz, base, entry;
-        if (ihx_load(&image, &sz, &base, &entry, 0xff, fin) < 0)
-            z_error(EXIT_FAILURE, errno, "ihx_load");
-        if (base > 0 || entry > 0)
-            z_error(EXIT_FAILURE, EFAULT, "ihx_load");
-        if (sz > fsz - ldsz)
-            z_error(EXIT_FAILURE, EFBIG, "ihx_load");
+        IHX ihx;
+        if (ihx_load(&ihx, 0xff, fin) < 0)
+            z_error(EXIT_FAILURE, errno, "ihx_load file=%s", opt.file);
+        if (ihx.entry > 0)
+            z_error(EXIT_FAILURE, EFAULT, "ihx_load entry=%#zx", ihx.entry);
+        if (ihx.sz > fsz - ldsz)
+            z_error(EXIT_FAILURE, EFBIG, "ihx_load sz=%#zx", ihx.sz);
 
-        printf("Write APROM[%zu]\n", sz);
-        if (!isp_write(0, image, sz, isp))
-            z_error(EXIT_FAILURE, errno, "isp_write(%zu)", sz);
+        printf("Write APROM[%zu]\n", ihx.sz);
+        if (!isp_write(ihx.base, ihx.image, ihx.sz, isp))
+            z_error(EXIT_FAILURE, errno, "isp_write(%zu)", ihx.sz);
 
-        free(image);
+        free(ihx.image);
         fclose(fin);
     }
 
@@ -315,22 +315,22 @@ uint8_t nuvoton_ldsize(size_t ldsz)
 
 void print_config(const CONFIG* configp)
 {
-    printf("CONFIG0 = 0x%02x\n", configp->byte.CONFIG0);
+    printf("CONFIG0 = %#02x\n", configp->byte.CONFIG0);
     printf("\tChip Lock\t\t%s\n", configp->bit.LOCK ? "no" : "yes");
     printf("\tReset Pin\t\t%s\n", configp->bit.RPD ? "enable" : "disable");
     printf("\tOn-Chip-Debugger\t%s\n", configp->bit.OCDEN ? "disable" : "enable");
     printf("\tPWM While OCD Halt\t%s\n", configp->bit.OCDPWM ? "tri-state" : "yes");
     printf("\tBoot Select\t\t%s\n", configp->bit.CBS ? "APROM" : "LDROM");
-    printf("CONFIG1 = 0x%02x\n", configp->byte.CONFIG1);
+    printf("CONFIG1 = %#02x\n", configp->byte.CONFIG1);
     printf("\tLDROM Size\t\t%zu\n", nuvoton_ldromsize(configp->bit.LDSIZE));
-    printf("CONFIG2 = 0x%02x\n", configp->byte.CONFIG2);
+    printf("CONFIG2 = %#02x\n", configp->byte.CONFIG2);
     printf("\tBrown-Out Reset\t\t%s\n", configp->bit.CBORST ? "yes" : "no");
     printf("\tBrown-Out Inhibit IAP\t%s\n", configp->bit.BOIAP ? "yes" : "no");
     printf("\tBrown-Out Voltage\t%s V\n",
         (const char*[]){ "2.2", "2.7", "3.7", "4.4" }[3 - configp->bit.CBOV]);
     printf("\tBrown-Out Detect\t%s\n", configp->bit.CBODEN ? "yes" : "no");
-    printf("CONFIG3 = 0x%02x\n", configp->byte.CONFIG3);
-    printf("CONFIG4 = 0x%02x\n", configp->byte.CONFIG4);
+    printf("CONFIG3 = %#02x\n", configp->byte.CONFIG3);
+    printf("CONFIG4 = %#02x\n", configp->byte.CONFIG4);
     printf("\tWatchdog Timer\t\t%s\n\n", configp->bit.WDTEN == 15 ? "disable" :
         configp->bit.WDTEN == 5 ? "enable" : "always");
 }
@@ -343,19 +343,15 @@ int str2bit(const char* str, int value_on)
     if (z_strcasecmp(str, "disable") == 0 || z_strcasecmp(str, "off") == 0
         || z_strcasecmp(str, "false") == 0 || z_strcasecmp(str, "no") == 0)
         return !value_on;
-
-    char* end;
-    unsigned long value = strtoul(str, &end, 0);
-    return (end == str) ? !value_on : !!value;
+    return (str[0] != '0');
 }
 
-int str2int(const char* str, const char* const* tokens, const int* numbers)
+int str2int(const char* const* tokens, const int* numbers, size_t n, const char* str)
 {
-    if (str) {
-        for (int i = 0; tokens[i]; ++i)
-            if (z_strcasecmp(str, tokens[i]) == 0)
+    if (str != NULL) {
+        for (size_t i = 0; i < n; ++i)
+            if (z_strcasecmp(tokens[i], str) == 0)
                 return numbers[i];
     }
-
     return numbers[0];
 }
