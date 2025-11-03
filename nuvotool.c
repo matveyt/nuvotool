@@ -73,7 +73,7 @@ static void parse_args(int argc, char* argv[])
         {0}
     };
 
-    static const char* const subopts[] = {
+    static char* const subopts[] = {
         [CONFIG_LOCK] = "lock",
         [CONFIG_RPD] = "rpd",
         [CONFIG_OCDEN] = "ocden",
